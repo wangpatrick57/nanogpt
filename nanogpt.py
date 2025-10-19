@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -64,8 +65,10 @@ if __name__ == "__main__":
     data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     data_path = Path("tinyshakespeare.txt")
     train_ratio = 0.9
-    batch_size = 4
+    batch_size = 32
     context_length = 8
+    num_steps = 10_000
+    lr = 1e-3
 
     # Preprocess data.
     if not data_path.exists():
@@ -83,11 +86,21 @@ if __name__ == "__main__":
 
     # Train model.
     model = BigramLanguageModel(vocab_size)
-    X_batch, Y_batch = data_loader.get_batch()
-    _, loss = model(X_batch, Y_batch)
-    print(loss)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    for _ in tqdm(range(num_steps)):
+        X_batch, Y_batch = data_loader.get_batch()
+        _, loss = model(X_batch, Y_batch)
+        optimizer.zero_grad()
+        assert isinstance(loss, torch.Tensor)
+        loss.backward()
+        optimizer.step()
+
+    print(loss.item())
 
     # Generate from model.
-    contexts = torch.tensor([[1], [2]])
-    contexts = model.generate(contexts, 3)
-    print(["".join([itoc[i] for i in context]) for context in contexts.tolist()])
+    contexts = torch.zeros(1, 1, dtype=torch.long)
+    contexts = model.generate(contexts, 100)
+    assert len(contexts) == 1
+    context = contexts[0]
+    print("".join([itoc[i] for i in context.tolist()]))
