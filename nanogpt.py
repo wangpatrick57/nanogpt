@@ -90,4 +90,4 @@ if __name__ == "__main__":
     # Generate from model.
     contexts = torch.tensor([[1], [2]])
     contexts = model.generate(contexts, 3)
-    print(contexts)
+    print(["".join([itoc[i] for i in context]) for context in contexts.tolist()])
