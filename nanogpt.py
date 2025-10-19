@@ -8,24 +8,30 @@ import wget
 
 
 class DataLoader:
-    def __init__(self, data: torch.Tensor, batch_size: int, context_length: int):
-        self.data = data
+    def __init__(
+        self,
+        data: torch.Tensor,
+        train_ratio: float,
+        batch_size: int,
+        context_length: int,
+    ):
+        split_idx = int(len(data) * train_ratio)
+        self.data_map = {"train": data[:split_idx], "val": data[split_idx:]}
         self.batch_size = batch_size
         self.context_length = context_length
 
-    def get_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
-        batch_idxs = torch.randint(
-            len(self.data) - self.context_length, (self.batch_size,)
-        )
+    def get_batch(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+        data = self.data_map[split]
+        batch_idxs = torch.randint(len(data) - self.context_length, (self.batch_size,))
         X = torch.stack(
             [
-                self.data[batch_idx : batch_idx + self.context_length]
+                data[batch_idx : batch_idx + self.context_length]
                 for batch_idx in batch_idxs
             ]
         )
         Y = torch.stack(
             [
-                self.data[batch_idx + 1 : batch_idx + self.context_length + 1]
+                data[batch_idx + 1 : batch_idx + self.context_length + 1]
                 for batch_idx in batch_idxs
             ]
         )
@@ -79,17 +85,14 @@ if __name__ == "__main__":
     dec = {tok: ch for ch, tok in enc.items()}
     vocab_size = len(enc)
     data = torch.tensor([enc[c] for c in raw_text], dtype=torch.long)
-    split_idx = int(len(data) * train_ratio)
-    train_data = data[:split_idx]
-    val_data = data[split_idx:]
-    data_loader = DataLoader(train_data, batch_size, context_length)
+    data_loader = DataLoader(data, train_ratio, batch_size, context_length)
 
     # Train model.
     model = BigramLanguageModel(vocab_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     for _ in tqdm(range(max_iters)):
-        X_batch, Y_batch = data_loader.get_batch()
+        X_batch, Y_batch = data_loader.get_batch("train")
         _, loss = model(X_batch, Y_batch)
         optimizer.zero_grad()
         assert isinstance(loss, torch.Tensor)
