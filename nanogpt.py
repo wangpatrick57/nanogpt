@@ -67,7 +67,7 @@ if __name__ == "__main__":
     train_ratio = 0.9
     batch_size = 32
     context_length = 8
-    num_steps = 10_000
+    max_iters = 10_000
     lr = 1e-3
 
     # Preprocess data.
@@ -75,10 +75,10 @@ if __name__ == "__main__":
         wget.download(data_url, out=str(data_path))
 
     raw_text = open(data_path).read()
-    ctoi = {c: i for i, c in enumerate(sorted(list(set(raw_text))))}
-    itoc = {i: c for c, i in ctoi.items()}
-    vocab_size = len(ctoi)
-    data = torch.tensor([ctoi[c] for c in raw_text], dtype=torch.long)
+    enc = {ch: tok for tok, ch in enumerate(sorted(list(set(raw_text))))}
+    dec = {tok: ch for ch, tok in enc.items()}
+    vocab_size = len(enc)
+    data = torch.tensor([enc[c] for c in raw_text], dtype=torch.long)
     split_idx = int(len(data) * train_ratio)
     train_data = data[:split_idx]
     val_data = data[split_idx:]
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     model = BigramLanguageModel(vocab_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-    for _ in tqdm(range(num_steps)):
+    for _ in tqdm(range(max_iters)):
         X_batch, Y_batch = data_loader.get_batch()
         _, loss = model(X_batch, Y_batch)
         optimizer.zero_grad()
@@ -103,4 +103,4 @@ if __name__ == "__main__":
     contexts = model.generate(contexts, 100)
     assert len(contexts) == 1
     context = contexts[0]
-    print("".join([itoc[i] for i in context.tolist()]))
+    print("".join([dec[tok] for tok in context.tolist()]))
