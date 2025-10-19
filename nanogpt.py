@@ -36,10 +36,26 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, vocab_size)
 
-    def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, X: torch.Tensor, Y: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         logits = self.embed(X)
-        loss = F.cross_entropy(logits.view(-1, logits.shape[-1]), Y.view(-1))
-        return loss
+        loss = (
+            None
+            if Y is None
+            else F.cross_entropy(logits.view(-1, logits.shape[-1]), Y.view(-1))
+        )
+        return logits, loss
+
+    def generate(self, contexts: torch.Tensor, max_new_tokens: int) -> torch.Tensor:
+        for _ in range(max_new_tokens):
+            logits, _ = self(contexts)
+            new_logits = logits[:, -1, :]
+            probs = F.softmax(new_logits, dim=-1)
+            tokens = torch.multinomial(probs, 1)
+            contexts = torch.cat((contexts, tokens), dim=-1)
+
+        return contexts
 
 
 if __name__ == "__main__":
@@ -68,5 +84,10 @@ if __name__ == "__main__":
     # Train model.
     model = BigramLanguageModel(vocab_size)
     X_batch, Y_batch = data_loader.get_batch()
-    loss = model(X_batch, Y_batch)
+    _, loss = model(X_batch, Y_batch)
     print(loss)
+
+    # Generate from model.
+    contexts = torch.tensor([[1], [2]])
+    contexts = model.generate(contexts, 3)
+    print(contexts)
