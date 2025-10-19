@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import wget
 
 
@@ -29,6 +31,17 @@ class DataLoader:
         return X, Y
 
 
+class BigramLanguageModel(nn.Module):
+    def __init__(self, vocab_size: int):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, vocab_size)
+
+    def forward(self, X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+        logits = self.embed(X)
+        loss = F.cross_entropy(logits.view(-1, logits.shape[-1]), Y.view(-1))
+        return loss
+
+
 if __name__ == "__main__":
     # Constants and hyperparameters.
     torch.manual_seed(1337)
@@ -41,6 +54,7 @@ if __name__ == "__main__":
     # Preprocess data.
     if not data_path.exists():
         wget.download(data_url, out=str(data_path))
+
     raw_text = open(data_path).read()
     ctoi = {c: i for i, c in enumerate(sorted(list(set(raw_text))))}
     itoc = {i: c for c, i in ctoi.items()}
@@ -50,4 +64,9 @@ if __name__ == "__main__":
     train_data = data[:split_idx]
     val_data = data[split_idx:]
     data_loader = DataLoader(train_data, batch_size, context_length)
-    X_tr, Y_tr = data_loader.get_batch()
+
+    # Train model.
+    model = BigramLanguageModel(vocab_size)
+    X_batch, Y_batch = data_loader.get_batch()
+    loss = model(X_batch, Y_batch)
+    print(loss)
