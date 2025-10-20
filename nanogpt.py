@@ -1,10 +1,18 @@
+from collections import defaultdict
 from pathlib import Path
+from enum import Enum
 
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 import wget
+
+
+class DataSplit(Enum):
+    TRAIN = "train"
+    VALIDATION = "validation"
 
 
 class DataLoader:
@@ -16,11 +24,14 @@ class DataLoader:
         context_length: int,
     ):
         split_idx = int(len(data) * train_ratio)
-        self.data_map = {"train": data[:split_idx], "val": data[split_idx:]}
+        self.data_map = {
+            DataSplit.TRAIN: data[:split_idx],
+            DataSplit.VALIDATION: data[split_idx:],
+        }
         self.batch_size = batch_size
         self.context_length = context_length
 
-    def get_batch(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_batch(self, split: DataSplit) -> tuple[torch.Tensor, torch.Tensor]:
         data = self.data_map[split]
         batch_idxs = torch.randint(len(data) - self.context_length, (self.batch_size,))
         X = torch.stack(
@@ -61,8 +72,21 @@ class BigramLanguageModel(nn.Module):
             probs = F.softmax(new_logits, dim=-1)
             tokens = torch.multinomial(probs, 1)
             contexts = torch.cat((contexts, tokens), dim=-1)
-
         return contexts
+
+
+@torch.no_grad()
+def estimate_losses(
+    model: BigramLanguageModel, data_loader: DataLoader
+) -> dict[DataSplit, float]:
+    losses = dict()
+    model.eval()
+    for split in DataSplit:
+        X_batch, Y_batch = data_loader.get_batch(split)
+        _, loss = model(X_batch, Y_batch)
+        losses[split] = loss.item()
+    model.train()
+    return losses
 
 
 if __name__ == "__main__":
@@ -74,6 +98,7 @@ if __name__ == "__main__":
     batch_size = 32
     context_length = 8
     max_iters = 10_000
+    eval_interval = 100
     lr = 1e-3
 
     # Preprocess data.
@@ -90,16 +115,25 @@ if __name__ == "__main__":
     # Train model.
     model = BigramLanguageModel(vocab_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    losses_over_time = defaultdict(list)
 
-    for _ in tqdm(range(max_iters)):
-        X_batch, Y_batch = data_loader.get_batch("train")
+    for iter in tqdm(range(max_iters)):
+        if iter % eval_interval == 0:
+            losses = estimate_losses(model, data_loader)
+            for split, loss in losses.items():
+                losses_over_time[split].append(loss)
+
+        X_batch, Y_batch = data_loader.get_batch(DataSplit.TRAIN)
         _, loss = model(X_batch, Y_batch)
         optimizer.zero_grad()
         assert isinstance(loss, torch.Tensor)
         loss.backward()
         optimizer.step()
 
-    print(loss.item())
+    for split, losses in losses_over_time.items():
+        plt.plot(range(len(losses)), losses, label=split.value)
+    plt.legend()
+    plt.show()
 
     # Generate from model.
     contexts = torch.zeros(1, 1, dtype=torch.long)
