@@ -115,10 +115,12 @@ if __name__ == "__main__":
     # Train model.
     model = BigramLanguageModel(vocab_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    est_loss_iters = []
     losses_over_time = defaultdict(list)
 
     for iter in tqdm(range(max_iters)):
         if iter % eval_interval == 0:
+            est_loss_iters.append(iter)
             losses = estimate_losses(model, data_loader)
             for split, loss in losses.items():
                 losses_over_time[split].append(loss)
@@ -131,7 +133,7 @@ if __name__ == "__main__":
         optimizer.step()
 
     for split, losses in losses_over_time.items():
-        plt.plot(range(len(losses)), losses, label=split.value)
+        plt.plot(est_loss_iters, losses, label=split.value)
     plt.legend()
     plt.show()
 
