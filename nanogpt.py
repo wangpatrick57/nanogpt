@@ -90,16 +90,21 @@ def estimate_losses(
 
 
 if __name__ == "__main__":
-    # Constants and hyperparameters.
+    # Misc. constants.
     torch.manual_seed(1337)
     data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     data_path = Path("tinyshakespeare.txt")
+
+    # Training hyperparameters.
     train_ratio = 0.9
     batch_size = 32
+    max_iters = 3000
+    eval_interval = 300
+    lr = 1e-2
+
+    # Model hyperparameters.
     context_length = 8
-    max_iters = 10_000
-    eval_interval = 100
-    lr = 1e-3
+    embed_dim = 32
 
     # Preprocess data.
     if not data_path.exists():
