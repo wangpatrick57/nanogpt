@@ -60,9 +60,6 @@ class AttentionHead(nn.Module):
         self.tril = torch.tril(torch.ones(context_length, context_length))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        (batch_size, context_size, embed_dim) -> (batch_size, context_size, head_dim)
-        """
         context_size = x.shape[-2]
         q = self.query(x)
         k = self.key(x)
@@ -90,9 +87,6 @@ class MultiHeadAttention(nn.Module):
         self.project = nn.Linear(num_heads * head_dim, embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
-        """
         out = torch.cat([head(x) for head in self.heads], dim=-1)
         proj = self.project(out)
         return proj
@@ -106,9 +100,6 @@ class FeedForward(nn.Module):
         self.project = nn.Linear(hidden_dim, embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
-        """
         preact = self.linear(x)
         act = self.relu(preact)
         proj = self.project(act)
@@ -125,15 +116,14 @@ class TransformerBlock(nn.Module):
         hidden_dim: int,
     ):
         super().__init__()
+        self.ln1 = nn.LayerNorm(embed_dim)
         self.attn = MultiHeadAttention(context_length, embed_dim, num_heads, head_dim)
+        self.ln2 = nn.LayerNorm(embed_dim)
         self.ffwd = FeedForward(embed_dim, hidden_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
-        """
-        attn_out = x + self.attn(x)
-        out = x + self.ffwd(attn_out)
+        attn_out = x + self.attn(self.ln1(x))
+        out = x + self.ffwd(self.ln2(attn_out))
         return out
 
 
@@ -160,23 +150,16 @@ class TransformerLanguageModel(nn.Module):
                 for _ in range(num_blocks)
             ]
         )
+        self.ln = nn.LayerNorm(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
         self, x: torch.Tensor, y: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """
-        x is (batch_size, context_size, vocab_size)
-        y is (batch_size, context_size)
-
-        Returns logits, loss
-        logits is (batch_size, context_size, vocab_size)
-        loss is (1,)
-        """
         token_embeds = self.token_emb(x)
         pos_embeds = self.pos_emb(torch.arange(x.shape[1]))
         embeds = token_embeds + pos_embeds
-        out = self.blocks(embeds)
+        out = self.ln(self.blocks(embeds))
         logits = self.lm_head(out)
         loss = (
             None
