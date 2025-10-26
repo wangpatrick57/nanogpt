@@ -77,47 +77,89 @@ class AttentionHead(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, context_length: int, embed_dim: int, num_heads: int):
+    def __init__(
+        self, context_length: int, embed_dim: int, num_heads: int, head_dim: int
+    ):
         super().__init__()
-        assert embed_dim % num_heads == 0
-        head_dim = embed_dim // num_heads
         self.heads = nn.ModuleList(
             [
                 AttentionHead(context_length, embed_dim, head_dim)
                 for _ in range(num_heads)
             ]
         )
+        self.project = nn.Linear(num_heads * head_dim, embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
         """
-        return torch.cat([head(x) for head in self.heads], dim=-1)
+        out = torch.cat([head(x) for head in self.heads], dim=-1)
+        proj = self.project(out)
+        return proj
 
 
 class FeedForward(nn.Module):
-    def __init__(self, embed_dim: int):
+    def __init__(self, embed_dim: int, hidden_dim: int):
         super().__init__()
-        self.linear = nn.Linear(embed_dim, embed_dim)
+        self.linear = nn.Linear(embed_dim, hidden_dim)
         self.relu = nn.ReLU()
+        self.project = nn.Linear(hidden_dim, embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
         """
-        return self.relu(self.linear(x))
+        preact = self.linear(x)
+        act = self.relu(preact)
+        proj = self.project(act)
+        return proj
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        context_length: int,
+        embed_dim: int,
+        num_heads: int,
+        head_dim: int,
+        hidden_dim: int,
+    ):
+        super().__init__()
+        self.attn = MultiHeadAttention(context_length, embed_dim, num_heads, head_dim)
+        self.ffwd = FeedForward(embed_dim, hidden_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
+        """
+        attn_out = x + self.attn(x)
+        out = x + self.ffwd(attn_out)
+        return out
 
 
 class TransformerLanguageModel(nn.Module):
     def __init__(
-        self, vocab_size: int, context_length: int, embed_dim: int, num_heads: int
+        self,
+        vocab_size: int,
+        context_length: int,
+        embed_dim: int,
+        num_heads: int,
+        head_dim: int,
+        hidden_dim: int,
+        num_blocks: int,
     ):
         super().__init__()
         self.context_length = context_length
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Embedding(context_length, embed_dim)
-        self.attn = MultiHeadAttention(context_length, embed_dim, num_heads)
-        self.ffwd = FeedForward(embed_dim)
+        self.blocks = nn.Sequential(
+            *[
+                TransformerBlock(
+                    context_length, embed_dim, num_heads, head_dim, hidden_dim
+                )
+                for _ in range(num_blocks)
+            ]
+        )
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
@@ -134,9 +176,8 @@ class TransformerLanguageModel(nn.Module):
         token_embeds = self.token_emb(x)
         pos_embeds = self.pos_emb(torch.arange(x.shape[1]))
         embeds = token_embeds + pos_embeds
-        attn_out = self.attn(embeds)
-        ffwd_out = self.ffwd(attn_out)
-        logits = self.lm_head(ffwd_out)
+        out = self.blocks(embeds)
+        logits = self.lm_head(out)
         loss = (
             None
             if y is None
@@ -186,7 +227,9 @@ def main():
     context_length = 8
     embed_dim = 32
     num_heads = 4
-    assert embed_dim % num_heads == 0
+    head_dim = embed_dim // num_heads
+    hidden_dim = embed_dim * 4
+    num_blocks = 3
 
     # Preprocess data.
     if not data_path.exists():
@@ -200,7 +243,15 @@ def main():
     data_loader = DataLoader(data, train_ratio, batch_size, context_length)
 
     # Train model.
-    model = TransformerLanguageModel(vocab_size, context_length, embed_dim, num_heads)
+    model = TransformerLanguageModel(
+        vocab_size,
+        context_length,
+        embed_dim,
+        num_heads,
+        head_dim,
+        hidden_dim,
+        num_blocks,
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     est_loss_iters = []
     losses_over_time = defaultdict(list)
@@ -227,7 +278,7 @@ def main():
 
     # Generate from model.
     contexts = torch.zeros(1, 1, dtype=torch.long)
-    contexts = model.generate(contexts, 1000)
+    contexts = model.generate(contexts, 200)
     assert len(contexts) == 1
     context = contexts[0]
     print("".join([dec[tok] for tok in context.tolist()]))
