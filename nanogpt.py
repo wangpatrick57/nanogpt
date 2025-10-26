@@ -117,7 +117,7 @@ class TransformerLanguageModel(nn.Module):
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Embedding(context_length, embed_dim)
         self.attn = MultiHeadAttention(context_length, embed_dim, num_heads)
-        self.ffn = FeedForward(embed_dim)
+        self.ffwd = FeedForward(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
@@ -135,8 +135,8 @@ class TransformerLanguageModel(nn.Module):
         pos_embeds = self.pos_emb(torch.arange(x.shape[1]))
         embeds = token_embeds + pos_embeds
         attn_out = self.attn(embeds)
-        ffn_out = self.ffn(attn_out)
-        logits = self.lm_head(ffn_out)
+        ffwd_out = self.ffwd(attn_out)
+        logits = self.lm_head(ffwd_out)
         loss = (
             None
             if y is None
