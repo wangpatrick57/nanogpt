@@ -61,10 +61,7 @@ class AttentionHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x is (batch_size, context_size, embed_dim)
-
-        Returns out
-        out is (batch_size, context_size, embed_dim)
+        (batch_size, context_size, embed_dim) -> (batch_size, context_size, head_dim)
         """
         context_size = x.shape[-2]
         q = self.query(x)
@@ -79,15 +76,34 @@ class AttentionHead(nn.Module):
         return out
 
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, context_length: int, embed_dim: int, num_heads: int):
+        super().__init__()
+        assert embed_dim % num_heads == 0
+        head_dim = embed_dim // num_heads
+        self.heads = nn.ModuleList(
+            [
+                AttentionHead(context_length, embed_dim, head_dim)
+                for _ in range(num_heads)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
+        """
+        return torch.cat([head(x) for head in self.heads], dim=-1)
+
+
 class TransformerLanguageModel(nn.Module):
     def __init__(
-        self, vocab_size: int, context_length: int, embed_dim: int, head_dim: int
+        self, vocab_size: int, context_length: int, embed_dim: int, num_heads: int
     ):
         super().__init__()
         self.context_length = context_length
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Embedding(context_length, embed_dim)
-        self.attn_head = AttentionHead(context_length, embed_dim, head_dim)
+        self.attn = MultiHeadAttention(context_length, embed_dim, num_heads)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
@@ -104,7 +120,7 @@ class TransformerLanguageModel(nn.Module):
         token_embeds = self.token_emb(x)
         pos_embeds = self.pos_emb(torch.arange(x.shape[1]))
         embeds = token_embeds + pos_embeds
-        attn_out = self.attn_head(embeds)
+        attn_out = self.attn(embeds)
         logits = self.lm_head(attn_out)
         loss = (
             None
@@ -154,7 +170,8 @@ def main():
     # Model hyperparameters.
     context_length = 8
     embed_dim = 32
-    head_dim = embed_dim
+    num_heads = 4
+    assert embed_dim % num_heads == 0
 
     # Preprocess data.
     if not data_path.exists():
@@ -168,7 +185,7 @@ def main():
     data_loader = DataLoader(data, train_ratio, batch_size, context_length)
 
     # Train model.
-    model = TransformerLanguageModel(vocab_size, context_length, embed_dim, head_dim)
+    model = TransformerLanguageModel(vocab_size, context_length, embed_dim, num_heads)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     est_loss_iters = []
     losses_over_time = defaultdict(list)
@@ -186,6 +203,7 @@ def main():
         assert isinstance(loss, torch.Tensor)
         loss.backward()
         optimizer.step()
+    print(f"{losses=}")
 
     for split, losses in losses_over_time.items():
         plt.plot(est_loss_iters, losses, label=split.value)
