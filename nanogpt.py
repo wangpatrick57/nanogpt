@@ -50,8 +50,9 @@ class DataLoader:
 
 
 class AttentionHead(nn.Module):
-    def __init__(self, embed_dim: int, head_dim: int):
+    def __init__(self, context_length: int, embed_dim: int, head_dim: int):
         super().__init__()
+        self.embed_dim = embed_dim
         self.query = nn.Linear(embed_dim, head_dim, bias=False)
         self.key = nn.Linear(embed_dim, head_dim, bias=False)
         self.value = nn.Linear(embed_dim, head_dim, bias=False)
@@ -69,7 +70,7 @@ class AttentionHead(nn.Module):
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
-        logits = q @ k.transpose(-1, -2) / embed_dim**0.5
+        logits = q @ k.transpose(-1, -2) / self.embed_dim**0.5
         masked_logits = logits.masked_fill(
             self.tril[:context_size, :context_size] == 0, float("-inf")
         )
@@ -86,7 +87,7 @@ class TransformerLanguageModel(nn.Module):
         self.context_length = context_length
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Embedding(context_length, embed_dim)
-        self.attn_head = AttentionHead(embed_dim, head_dim)
+        self.attn_head = AttentionHead(context_length, embed_dim, head_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
@@ -137,7 +138,7 @@ def estimate_losses(
     return losses
 
 
-if __name__ == "__main__":
+def main():
     # Misc. constants.
     torch.manual_seed(1337)
     data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
@@ -197,3 +198,7 @@ if __name__ == "__main__":
     assert len(contexts) == 1
     context = contexts[0]
     print("".join([dec[tok] for tok in context.tolist()]))
+
+
+if __name__ == "__main__":
+    main()
