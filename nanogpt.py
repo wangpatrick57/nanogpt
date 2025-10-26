@@ -50,12 +50,15 @@ class DataLoader:
 
 
 class AttentionHead(nn.Module):
-    def __init__(self, context_length: int, embed_dim: int, head_dim: int):
+    def __init__(
+        self, context_length: int, embed_dim: int, head_dim: int, dropout: float
+    ):
         super().__init__()
         self.embed_dim = embed_dim
         self.query = nn.Linear(embed_dim, head_dim, bias=False)
         self.key = nn.Linear(embed_dim, head_dim, bias=False)
         self.value = nn.Linear(embed_dim, head_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
         # TODO: figure out whether this needs to be a buffer
         self.tril = torch.tril(torch.ones(context_length, context_length))
 
@@ -65,45 +68,51 @@ class AttentionHead(nn.Module):
         k = self.key(x)
         v = self.value(x)
         logits = q @ k.transpose(-1, -2) / self.embed_dim**0.5
-        masked_logits = logits.masked_fill(
+        logits = logits.masked_fill(
             self.tril[:context_size, :context_size] == 0, float("-inf")
         )
-        probs = F.softmax(masked_logits, dim=-1)
+        probs = self.dropout(F.softmax(logits, dim=-1))
         out = probs @ v
         return out
 
 
 class MultiHeadAttention(nn.Module):
     def __init__(
-        self, context_length: int, embed_dim: int, num_heads: int, head_dim: int
+        self,
+        context_length: int,
+        embed_dim: int,
+        num_heads: int,
+        head_dim: int,
+        dropout: float,
     ):
         super().__init__()
         self.heads = nn.ModuleList(
             [
-                AttentionHead(context_length, embed_dim, head_dim)
+                AttentionHead(context_length, embed_dim, head_dim, dropout)
                 for _ in range(num_heads)
             ]
         )
-        self.project = nn.Linear(num_heads * head_dim, embed_dim)
+        self.proj = nn.Linear(num_heads * head_dim, embed_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.cat([head(x) for head in self.heads], dim=-1)
-        proj = self.project(out)
-        return proj
+        out = self.dropout(self.proj(out))
+        return out
 
 
 class FeedForward(nn.Module):
-    def __init__(self, embed_dim: int, hidden_dim: int):
+    def __init__(self, embed_dim: int, hidden_dim: int, dropout: float):
         super().__init__()
-        self.linear = nn.Linear(embed_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.project = nn.Linear(hidden_dim, embed_dim)
+        self.net = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, embed_dim),
+            nn.Dropout(dropout),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        preact = self.linear(x)
-        act = self.relu(preact)
-        proj = self.project(act)
-        return proj
+        return self.net(x)
 
 
 class TransformerBlock(nn.Module):
@@ -114,17 +123,20 @@ class TransformerBlock(nn.Module):
         num_heads: int,
         head_dim: int,
         hidden_dim: int,
+        dropout: float,
     ):
         super().__init__()
         self.ln1 = nn.LayerNorm(embed_dim)
-        self.attn = MultiHeadAttention(context_length, embed_dim, num_heads, head_dim)
+        self.attn = MultiHeadAttention(
+            context_length, embed_dim, num_heads, head_dim, dropout
+        )
         self.ln2 = nn.LayerNorm(embed_dim)
-        self.ffwd = FeedForward(embed_dim, hidden_dim)
+        self.ffwd = FeedForward(embed_dim, hidden_dim, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        attn_out = x + self.attn(self.ln1(x))
-        out = x + self.ffwd(self.ln2(attn_out))
-        return out
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
+        return x
 
 
 class TransformerLanguageModel(nn.Module):
@@ -137,6 +149,7 @@ class TransformerLanguageModel(nn.Module):
         head_dim: int,
         hidden_dim: int,
         num_blocks: int,
+        dropout: float,
     ):
         super().__init__()
         self.context_length = context_length
@@ -145,7 +158,7 @@ class TransformerLanguageModel(nn.Module):
         self.blocks = nn.Sequential(
             *[
                 TransformerBlock(
-                    context_length, embed_dim, num_heads, head_dim, hidden_dim
+                    context_length, embed_dim, num_heads, head_dim, hidden_dim, dropout
                 )
                 for _ in range(num_blocks)
             ]
@@ -201,18 +214,19 @@ def main():
 
     # Training hyperparameters.
     train_ratio = 0.9
-    batch_size = 32
+    batch_size = 64
     max_iters = 5000
     eval_interval = 500
-    lr = 1e-3
+    lr = 3e-4
 
     # Model hyperparameters.
-    context_length = 8
-    embed_dim = 32
-    num_heads = 4
+    context_length = 256
+    embed_dim = 384
+    num_heads = 6
     head_dim = embed_dim // num_heads
     hidden_dim = embed_dim * 4
-    num_blocks = 3
+    num_blocks = 6
+    dropout = 0.2
 
     # Preprocess data.
     if not data_path.exists():
@@ -234,6 +248,7 @@ def main():
         head_dim,
         hidden_dim,
         num_blocks,
+        dropout,
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     est_loss_iters = []
