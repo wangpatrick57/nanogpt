@@ -95,6 +95,19 @@ class MultiHeadAttention(nn.Module):
         return torch.cat([head(x) for head in self.heads], dim=-1)
 
 
+class FeedForward(nn.Module):
+    def __init__(self, embed_dim: int):
+        super().__init__()
+        self.linear = nn.Linear(embed_dim, embed_dim)
+        self.relu = nn.ReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        (batch_size, context_size, embed_dim) -> (batch_size, context_size, embed_dim)
+        """
+        return self.relu(self.linear(x))
+
+
 class TransformerLanguageModel(nn.Module):
     def __init__(
         self, vocab_size: int, context_length: int, embed_dim: int, num_heads: int
@@ -104,6 +117,7 @@ class TransformerLanguageModel(nn.Module):
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Embedding(context_length, embed_dim)
         self.attn = MultiHeadAttention(context_length, embed_dim, num_heads)
+        self.ffn = FeedForward(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(
@@ -121,7 +135,8 @@ class TransformerLanguageModel(nn.Module):
         pos_embeds = self.pos_emb(torch.arange(x.shape[1]))
         embeds = token_embeds + pos_embeds
         attn_out = self.attn(embeds)
-        logits = self.lm_head(attn_out)
+        ffn_out = self.ffn(attn_out)
+        logits = self.lm_head(ffn_out)
         loss = (
             None
             if y is None
@@ -212,7 +227,7 @@ def main():
 
     # Generate from model.
     contexts = torch.zeros(1, 1, dtype=torch.long)
-    contexts = model.generate(contexts, 100)
+    contexts = model.generate(contexts, 1000)
     assert len(contexts) == 1
     context = contexts[0]
     print("".join([dec[tok] for tok in context.tolist()]))
